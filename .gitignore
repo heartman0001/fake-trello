@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.next/
+out/
+coverage/
+.turbo/
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+*.tsbuildinfo
+
+# Prisma
+prisma/*.db
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
