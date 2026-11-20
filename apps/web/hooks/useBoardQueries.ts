@@ -1,6 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { generateKeyBetween } from 'fractional-indexing';
 import {
+  BoardMember,
   BoardWithRelations,
   CardWithRelations,
   ChecklistItem,
@@ -306,6 +313,19 @@ export function useDeleteColumn(boardId: string) {
   });
 }
 
+export function useDeleteBoard(boardId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.delete(`/boards/${boardId}`),
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: boardKey(boardId) });
+      queryClient.invalidateQueries({ queryKey: ['boards'] });
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+    },
+  });
+}
+
 export function useCreateLabel(boardId: string) {
   const queryClient = useQueryClient();
 
@@ -487,6 +507,81 @@ export function useDeleteComment(boardId: string) {
         `/boards/${boardId}/columns/${columnId}/cards/${cardId}/comments/${commentId}`,
       ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: boardKey(boardId) }),
+  });
+}
+
+// Board Members
+export function useAddBoardMember(boardId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: string }) =>
+      api.addBoardMember(boardId, { userId, role }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: boardKey(boardId) });
+    },
+  });
+}
+
+export function useRemoveBoardMember(boardId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (userId: string) => api.removeBoardMember(boardId, userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: boardKey(boardId) });
+    },
+  });
+}
+
+export function useGetBoardMembers(boardId: string) {
+  return useQuery({
+    queryKey: ['board-members', boardId],
+    queryFn: () => api.getBoardMembers<BoardMember[]>(boardId),
+    enabled: !!boardId,
+  });
+}
+
+export interface UserSummary {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface InviteCandidatePage {
+  items: UserSummary[];
+  page: number;
+  limit: number;
+  hasMore: boolean;
+}
+
+const INVITE_PAGE_SIZE = 20;
+
+/**
+ * Paginated invite search. Existing board members are excluded server-side;
+ * a single character does not query so typing does not spam the API.
+ */
+export function useInviteCandidates(
+  boardId: string,
+  search: string,
+  enabled = true,
+) {
+  const query = search.trim();
+
+  return useInfiniteQuery({
+    queryKey: ['invite-candidates', boardId, query],
+    queryFn: ({ pageParam }) =>
+      api.getAllUsers<InviteCandidatePage>({
+        boardId,
+        search: query,
+        page: pageParam,
+        limit: INVITE_PAGE_SIZE,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.hasMore ? lastPage.page + 1 : undefined,
+    enabled: enabled && !!boardId && query.length !== 1,
+    placeholderData: keepPreviousData,
   });
 }
 

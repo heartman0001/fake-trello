@@ -8,6 +8,7 @@ import type { CardWithRelations } from '@fake-trello/shared';
 interface KanbanCardProps {
   card: CardWithRelations;
   onClick?: () => void;
+  isDropPreview?: boolean;
 }
 
 interface CardSurfaceProps {
@@ -212,7 +213,11 @@ function CardSurface({
   );
 }
 
-export default function KanbanCard({ card, onClick }: KanbanCardProps) {
+export default function KanbanCard({
+  card,
+  onClick,
+  isDropPreview = false,
+}: KanbanCardProps) {
   const {
     attributes,
     listeners,
@@ -237,7 +242,13 @@ export default function KanbanCard({ card, onClick }: KanbanCardProps) {
         transform: CSS.Transform.toString(transform),
         transition,
       }}
-      className={isDragging ? 'opacity-40' : undefined}
+      className={
+        isDropPreview
+          ? 'rounded-xl border-2 border-dashed border-blue-400 bg-blue-50/60 p-1 shadow-sm'
+          : isDragging
+            ? 'opacity-40'
+            : undefined
+      }
     >
       <CardSurface
         card={card}

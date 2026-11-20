@@ -24,22 +24,27 @@ export class ColumnsController {
   }
 
   @Get(':id')
-  async findById(@Param('id') id: string) {
-    return this.columnsService.findById(id);
+  async findById(@Param('boardId') boardId: string, @Param('id') id: string) {
+    return this.columnsService.findById(boardId, id);
   }
 
   @Put(':id')
   async update(
+    @Param('boardId') boardId: string,
     @Param('id') id: string,
     @CurrentUser() user: any,
     @Body() updateColumnDto: UpdateColumnDTO,
   ) {
-    return this.columnsService.update(id, user.id, updateColumnDto);
+    return this.columnsService.update(boardId, id, user.id, updateColumnDto);
   }
 
   @Delete(':id')
-  async delete(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.columnsService.delete(id, user.id);
+  async delete(
+    @Param('boardId') boardId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.columnsService.delete(boardId, id, user.id);
   }
 
   @Post('reorder')

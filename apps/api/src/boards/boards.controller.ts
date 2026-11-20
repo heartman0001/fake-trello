@@ -37,4 +37,27 @@ export class BoardsController {
   async delete(@Param('id') id: string, @CurrentUser() user: any) {
     return this.boardsService.delete(id, user.id);
   }
+
+  @Post(':id/members')
+  async addMember(
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+    @Body() body: { userId: string; role: string },
+  ) {
+    return this.boardsService.addMember(id, user.id, body.userId, body.role);
+  }
+
+  @Delete(':boardId/members/:userId')
+  async removeMember(
+    @Param('boardId') boardId: string,
+    @CurrentUser() user: any,
+    @Param('userId') userId: string,
+  ) {
+    return this.boardsService.removeMember(boardId, user.id, userId);
+  }
+
+  @Get(':id/members')
+  async getMembers(@Param('id') id: string) {
+    return this.boardsService.getMembers(id);
+  }
 }

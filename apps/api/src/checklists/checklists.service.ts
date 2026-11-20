@@ -18,7 +18,16 @@ const CHECKLIST_INCLUDE = {
 export class ChecklistsService {
   constructor(private prisma: PrismaService) {}
 
-  async findByCard(cardId: string) {
+  async findByCard(boardId: string, columnId: string, cardId: string) {
+    const card = await this.prisma.card.findFirst({
+      where: { id: cardId, columnId, column: { is: { boardId } } },
+      select: { id: true },
+    });
+
+    if (!card) {
+      throw new NotFoundException('Card not found on this board');
+    }
+
     return this.prisma.checklist.findUnique({
       where: { cardId },
       include: CHECKLIST_INCLUDE,
@@ -126,6 +135,7 @@ export class ChecklistsService {
                     members: { where: { userId }, select: { id: true } },
                   },
                 },
+                boardMembers: { where: { userId }, select: { id: true } },
               },
             },
           },
@@ -137,8 +147,12 @@ export class ChecklistsService {
       throw new NotFoundException('Card not found');
     }
 
-    const { workspace } = card.column.board;
-    if (workspace.ownerId !== userId && workspace.members.length === 0) {
+    const { workspace, boardMembers } = card.column.board;
+    if (
+      workspace.ownerId !== userId &&
+      workspace.members.length === 0 &&
+      boardMembers.length === 0
+    ) {
       throw new ForbiddenException('You do not have access to this card');
     }
   }
@@ -158,6 +172,7 @@ export class ChecklistsService {
                         members: { where: { userId }, select: { id: true } },
                       },
                     },
+                    boardMembers: { where: { userId }, select: { id: true } },
                   },
                 },
               },
@@ -171,8 +186,12 @@ export class ChecklistsService {
       throw new NotFoundException('Checklist not found');
     }
 
-    const { workspace } = checklist.card.column.board;
-    if (workspace.ownerId !== userId && workspace.members.length === 0) {
+    const { workspace, boardMembers } = checklist.card.column.board;
+    if (
+      workspace.ownerId !== userId &&
+      workspace.members.length === 0 &&
+      boardMembers.length === 0
+    ) {
       throw new ForbiddenException('You do not have access to this checklist');
     }
   }

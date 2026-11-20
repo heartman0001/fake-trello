@@ -36,6 +36,7 @@ model User {
   email         String    @unique
   password      String
   name          String
+  avatarUrl     String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -43,6 +44,7 @@ model User {
   workspaces       WorkspaceMember[]
   ownedWorkspaces  Workspace[]       @relation("WorkspaceOwner")
   assignedCards    Card[]            @relation("CardAssignee")
+  boardMembers     BoardMember[]
   comments         Comment[]
   activityLogs     ActivityLog[]
 
@@ -100,9 +102,30 @@ model Board {
   columns     Column[]
   labels      Label[]
   activityLogs ActivityLog[]
+  boardMembers BoardMember[]
 
   @@index([workspaceId])
   @@map("boards")
+}
+
+// ============== Board Members =============
+model BoardMember {
+  id         String       @id @default(cuid())
+  boardId    String
+  userId     String
+  role       UserRole     @default(MEMBER)
+  joinedAt   DateTime     @default(now())
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  // Relations
+  board      Board        @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([boardId, userId])
+  @@index([boardId])
+  @@index([userId])
+  @@map("board_members")
 }
 
 // ============== Columns ==============

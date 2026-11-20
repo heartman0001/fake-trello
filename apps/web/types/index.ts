@@ -13,7 +13,32 @@ export interface WorkspaceSummary {
   ownerId: string;
   owner: Pick<User, 'id' | 'name' | 'email'>;
   memberRole: WorkspaceMemberRole;
+  isWorkspaceMember?: boolean;
+  pendingInvitees?: WorkspaceInviteeEntry[];
   _count: { boards: number; members: number };
+}
+
+export interface WorkspaceMemberEntry {
+  id: string;
+  userId: string;
+  role: WorkspaceMemberRole;
+  user: Pick<User, 'id' | 'name' | 'email'>;
+}
+
+export interface WorkspaceInviteeEntry {
+  userId: string;
+  user: Pick<User, 'id' | 'name' | 'email'>;
+  boards: string[];
+}
+
+export interface WorkspaceManagement {
+  id: string;
+  name: string;
+  description?: string | null;
+  owner: Pick<User, 'id' | 'name' | 'email'>;
+  memberRole: WorkspaceMemberRole;
+  members: WorkspaceMemberEntry[];
+  invitees: WorkspaceInviteeEntry[];
 }
 
 export interface BoardSummary {

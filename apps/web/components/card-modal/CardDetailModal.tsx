@@ -20,15 +20,17 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import type {
-  BoardWithRelations,
-  CardWithRelations,
+import {
+  LabelColors,
+  type BoardWithRelations,
+  type CardWithRelations,
 } from '@fake-trello/shared';
 import { useAuthStore } from '@/store/useAuthStore';
 import {
   useAddCardLabel,
   useAddChecklistItem,
   useCreateChecklist,
+  useCreateLabel,
   useCreateComment,
   useDeleteCard,
   useDeleteChecklistItem,
@@ -41,6 +43,8 @@ import {
   useCardAutosave,
   type AutosaveStatus,
 } from '@/hooks/useCardAutosave';
+import { usePreferences } from '@/lib/preferences';
+import type { Locale, TranslationKey } from '@/lib/i18n';
 
 type CardDetailModalVariant = 'overlay' | 'page';
 
@@ -64,38 +68,42 @@ function toDateInputValue(value: Date | string | null | undefined) {
   return local.toISOString().slice(0, 10);
 }
 
-function formatDueDate(value: Date | string) {
-  return new Intl.DateTimeFormat('en', {
+function formatDueDate(value: Date | string, locale: Locale) {
+  return new Intl.DateTimeFormat(locale === 'th' ? 'th-TH' : 'en', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
   }).format(new Date(value));
 }
 
-function formatRelativeTime(value: Date | string) {
+function formatRelativeTime(
+  value: Date | string,
+  locale: Locale,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+) {
   const date = new Date(value);
   const diffMs = Date.now() - date.getTime();
 
   if (Number.isNaN(diffMs)) return '';
-  if (diffMs < 60_000) return 'just now';
+  if (diffMs < 60_000) return t('justNow');
 
   const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return t('minutesAgo', { count: minutes });
 
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t('hoursAgo', { count: hours });
 
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
+  if (days < 7) return t('daysAgo', { count: days });
 
-  return new Intl.DateTimeFormat('en', {
+  return new Intl.DateTimeFormat(locale === 'th' ? 'th-TH' : 'en', {
     month: 'short',
     day: 'numeric',
   }).format(date);
 }
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : 'Something went wrong.';
+function getErrorMessage(error: unknown, t: (key: TranslationKey) => string) {
+  return error instanceof Error ? error.message : t('somethingWentWrong');
 }
 
 function SaveStatus({
@@ -107,6 +115,8 @@ function SaveStatus({
   error: string | null;
   onRetry: () => void;
 }) {
+  const { t } = usePreferences();
+
   if (status === 'error') {
     return (
       <span
@@ -114,13 +124,13 @@ function SaveStatus({
         className="inline-flex items-center gap-1.5 text-xs font-medium text-red-600"
       >
         <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
-        {error ?? 'Could not save'}
+        {error ?? t('couldNotSave')}
         <button
           type="button"
           onClick={onRetry}
           className="rounded underline decoration-red-300 underline-offset-2 transition-colors hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
         >
-          Retry
+          {t('retry')}
         </button>
       </span>
     );
@@ -134,7 +144,7 @@ function SaveStatus({
         className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700"
       >
         <Check className="h-3.5 w-3.5" aria-hidden="true" />
-        Saved
+        {t('saved')}
       </span>
     );
   }
@@ -147,13 +157,13 @@ function SaveStatus({
         className="inline-flex items-center gap-1 text-xs font-medium text-gray-500"
       >
         <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-        Saving…
+        {t('saving')}
       </span>
     );
   }
 
   return (
-    <span className="text-xs text-gray-500">Changes save automatically</span>
+    <span className="text-xs text-gray-500">{t('saveAutomatically')}</span>
   );
 }
 
@@ -163,6 +173,7 @@ export default function CardDetailModal({
   variant = 'overlay',
   onClose,
 }: CardDetailModalProps) {
+  const { locale, t } = usePreferences();
   const currentUser = useAuthStore((state) => state.user);
   const column = board.columns.find((entry) => entry.id === card.columnId);
 
@@ -172,6 +183,7 @@ export default function CardDetailModal({
   const deleteCard = useDeleteCard(board.id);
   const addLabel = useAddCardLabel(board.id);
   const removeLabel = useRemoveCardLabel(board.id);
+  const createLabel = useCreateLabel(board.id);
   const createChecklist = useCreateChecklist(board.id);
   const addChecklistItem = useAddChecklistItem(board.id);
   const updateChecklistItem = useUpdateChecklistItem(board.id);
@@ -181,6 +193,9 @@ export default function CardDetailModal({
 
   const [newItem, setNewItem] = useState('');
   const [newComment, setNewComment] = useState('');
+  const [isLabelFormOpen, setIsLabelFormOpen] = useState(false);
+  const [newLabelName, setNewLabelName] = useState('');
+  const [newLabelColor, setNewLabelColor] = useState<string>(LabelColors[0]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -197,6 +212,28 @@ export default function CardDetailModal({
     [card.labels],
   );
 
+  const handleCreateLabel = (event: FormEvent) => {
+    event.preventDefault();
+    const name = newLabelName.trim();
+    if (!name) return;
+
+    run(async () => {
+      const label = await createLabel.mutateAsync({
+        name,
+        color: newLabelColor,
+      });
+      // Creating a label from the card attaches it to that card right away.
+      await addLabel.mutateAsync({
+        cardId: card.id,
+        columnId: card.columnId,
+        labelId: label.id,
+      });
+      setNewLabelName('');
+      setNewLabelColor(LabelColors[0]);
+      setIsLabelFormOpen(false);
+    });
+  };
+
   const dueDate = card.dueDate ? new Date(card.dueDate) : null;
   const dueIsOverdue = Boolean(
     dueDate && startOfDay(dueDate) < startOfDay(new Date()),
@@ -211,7 +248,7 @@ export default function CardDetailModal({
     try {
       await action();
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      setActionError(getErrorMessage(error, t));
     }
   };
 
@@ -228,7 +265,7 @@ export default function CardDetailModal({
         const created = await createChecklist.mutateAsync({
           cardId: card.id,
           columnId: card.columnId,
-          title: 'Checklist',
+          title: t('checklist'),
         });
         checklistId = created.id;
       }
@@ -241,7 +278,7 @@ export default function CardDetailModal({
       });
       setNewItem('');
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      setActionError(getErrorMessage(error, t));
     }
   };
 
@@ -259,7 +296,7 @@ export default function CardDetailModal({
       });
       setNewComment('');
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      setActionError(getErrorMessage(error, t));
     }
   };
 
@@ -281,7 +318,7 @@ export default function CardDetailModal({
       });
       onClose();
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      setActionError(getErrorMessage(error, t));
       setConfirmingDelete(false);
     }
   };
@@ -358,7 +395,7 @@ export default function CardDetailModal({
       <header className="flex items-start gap-3 border-b border-gray-200 px-5 py-4 sm:px-6 sm:py-5">
         <div className="min-w-0 flex-1">
           <label htmlFor="card-detail-title" className="sr-only">
-            Card title
+            {t('cardTitle')}
           </label>
           <input
             id="card-detail-title"
@@ -372,7 +409,7 @@ export default function CardDetailModal({
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-xs text-gray-500">
             <span className="inline-flex min-w-0 items-center gap-1">
               <Columns3 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">{column?.title ?? 'List'}</span>
+              <span className="truncate">{column?.title ?? t('list')}</span>
             </span>
             <span aria-hidden="true">·</span>
             <span className="max-w-[14rem] truncate">{board.title}</span>
@@ -388,7 +425,7 @@ export default function CardDetailModal({
           type="button"
           onClick={onClose}
           className="shrink-0 rounded-md p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-          aria-label="Close card"
+          aria-label={t('closeCard')}
         >
           <X className="h-5 w-5" aria-hidden="true" />
         </button>
@@ -408,7 +445,7 @@ export default function CardDetailModal({
             type="button"
             onClick={() => setActionError(null)}
             className="shrink-0 rounded p-0.5 text-red-500 transition-colors hover:bg-red-100 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
-            aria-label="Dismiss error"
+            aria-label={t('dismissError')}
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
@@ -420,10 +457,10 @@ export default function CardDetailModal({
           <div className="min-w-0 space-y-7">
             <section>
               <h3 className="text-sm font-semibold text-gray-900">
-                Description
+                {t('description')}
               </h3>
               <label htmlFor="card-description" className="sr-only">
-                Card description
+                {t('cardDescription')}
               </label>
               <textarea
                 id="card-description"
@@ -431,7 +468,7 @@ export default function CardDetailModal({
                 value={autosave.description}
                 onChange={(event) => autosave.setDescription(event.target.value)}
                 onBlur={autosave.handleDescriptionBlur}
-                placeholder="Add a more detailed description…"
+                placeholder={t('addDescription')}
                 className="mt-2 w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm leading-6 text-gray-800 transition-colors placeholder:text-gray-500 hover:border-gray-300 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/25"
               />
             </section>
@@ -442,7 +479,7 @@ export default function CardDetailModal({
                   id="checklist-heading"
                   className="text-sm font-semibold text-gray-900"
                 >
-                  Checklist
+                  {t('checklist')}
                   <span className="ml-2 text-xs font-normal tabular-nums text-gray-500">
                     {completedCount}/{items.length}
                   </span>
@@ -457,7 +494,7 @@ export default function CardDetailModal({
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={progress}
-                aria-label="Checklist progress"
+                aria-label={t('checklistProgress')}
                 className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100"
               >
                 <div
@@ -468,8 +505,7 @@ export default function CardDetailModal({
 
               {items.length === 0 ? (
                 <p className="mt-3 rounded-lg border border-dashed border-gray-200 px-3 py-4 text-center text-xs leading-5 text-gray-500">
-                  Break this card into smaller steps. The first item creates the
-                  checklist.
+                  {t('checklistEmpty')}
                 </p>
               ) : (
                 <ul className="mt-3 space-y-0.5">
@@ -494,9 +530,10 @@ export default function CardDetailModal({
                           )
                         }
                         className="h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 disabled:cursor-wait"
-                        aria-label={`Mark ${item.title} as ${
-                          item.completed ? 'incomplete' : 'complete'
-                        }`}
+                        aria-label={t(
+                          item.completed ? 'markIncomplete' : 'markComplete',
+                          { title: item.title },
+                        )}
                       />
                       <span
                         className={`min-w-0 flex-1 break-words text-sm leading-5 ${
@@ -521,7 +558,9 @@ export default function CardDetailModal({
                         }
                         disabled={deleteChecklistItem.isPending}
                         className="shrink-0 rounded p-1 text-gray-300 transition-colors hover:bg-white hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-wait sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
-                        aria-label={`Delete checklist item ${item.title}`}
+                        aria-label={t('deleteChecklistItem', {
+                          title: item.title,
+                        })}
                       >
                         <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
@@ -532,13 +571,13 @@ export default function CardDetailModal({
 
               <form onSubmit={handleAddItem} className="mt-2 flex gap-2">
                 <label htmlFor="new-checklist-item" className="sr-only">
-                  New checklist item
+                  {t('newChecklistItem')}
                 </label>
                 <input
                   id="new-checklist-item"
                   value={newItem}
                   onChange={(event) => setNewItem(event.target.value)}
-                  placeholder="Add an item"
+                  placeholder={t('addItem')}
                   maxLength={200}
                   className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm transition-colors placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25"
                 />
@@ -552,7 +591,7 @@ export default function CardDetailModal({
                   className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-300"
                 >
                   <Plus className="h-4 w-4" aria-hidden="true" />
-                  Add
+                  {t('add')}
                 </button>
               </form>
             </section>
@@ -562,7 +601,7 @@ export default function CardDetailModal({
                 id="comments-heading"
                 className="text-sm font-semibold text-gray-900"
               >
-                Comments
+                {t('comments')}
                 <span className="ml-2 text-xs font-normal tabular-nums text-gray-500">
                   {card.comments.length}
                 </span>
@@ -574,7 +613,7 @@ export default function CardDetailModal({
                     className="h-4 w-4 shrink-0 text-gray-400"
                     aria-hidden="true"
                   />
-                  No comments yet. Start the conversation below.
+                  {t('noComments')}
                 </div>
               ) : (
                 <ul className="mt-3 space-y-4">
@@ -596,7 +635,7 @@ export default function CardDetailModal({
                               dateTime={new Date(comment.createdAt).toISOString()}
                               className="text-[11px] text-gray-500"
                             >
-                              {formatRelativeTime(comment.createdAt)}
+                              {formatRelativeTime(comment.createdAt, locale, t)}
                             </time>
                             {currentUser?.id === comment.userId && (
                               <button
@@ -613,7 +652,7 @@ export default function CardDetailModal({
                                 disabled={deleteComment.isPending}
                                 className="rounded text-[11px] font-medium text-gray-500 transition-colors hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-wait"
                               >
-                                Delete
+                                {t('delete')}
                               </button>
                             )}
                           </div>
@@ -629,7 +668,7 @@ export default function CardDetailModal({
 
               <form onSubmit={handleAddComment} className="mt-3">
                 <label htmlFor="new-comment" className="sr-only">
-                  Write a comment
+                  {t('writeComment')}
                 </label>
                 <textarea
                   id="new-comment"
@@ -637,7 +676,7 @@ export default function CardDetailModal({
                   value={newComment}
                   onChange={(event) => setNewComment(event.target.value)}
                   onKeyDown={handleCommentKeyDown}
-                  placeholder="Write a comment…"
+                  placeholder={t('commentPlaceholder')}
                   className="w-full resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm leading-6 transition-colors placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25"
                 />
                 <div className="mt-2 flex items-center justify-between gap-3">
@@ -645,7 +684,7 @@ export default function CardDetailModal({
                     <kbd className="rounded border border-gray-200 bg-gray-50 px-1 font-sans">
                       ⌘/Ctrl
                     </kbd>{' '}
-                    + Enter to send
+                    {t('commentHint')}
                   </p>
                   <button
                     type="submit"
@@ -658,7 +697,7 @@ export default function CardDetailModal({
                         aria-hidden="true"
                       />
                     )}
-                    Comment
+                    {t('comment')}
                   </button>
                 </div>
               </form>
@@ -672,7 +711,7 @@ export default function CardDetailModal({
                 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500"
               >
                 <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
-                Due date
+                {t('dueDate')}
               </h3>
               <div className="mt-2">
                 <input
@@ -692,7 +731,7 @@ export default function CardDetailModal({
                       }),
                     );
                   }}
-                  aria-label="Due date"
+                  aria-label={t('dueDate')}
                   className="w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm text-gray-800 transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25 disabled:cursor-wait disabled:bg-gray-50"
                 />
                 <div className="mt-1.5 flex min-h-[1rem] items-center justify-between gap-2">
@@ -707,11 +746,11 @@ export default function CardDetailModal({
                   >
                     {dueDate
                       ? dueIsOverdue
-                        ? `Overdue · ${formatDueDate(dueDate)}`
+                        ? `${t('overdue')} · ${formatDueDate(dueDate, locale)}`
                         : dueIsToday
-                          ? 'Due today'
-                          : formatDueDate(dueDate)
-                      : 'No due date'}
+                          ? t('dueToday')
+                          : formatDueDate(dueDate, locale)
+                      : t('noDueDate')}
                   </p>
                   {card.dueDate && (
                     <button
@@ -728,7 +767,7 @@ export default function CardDetailModal({
                       className="inline-flex items-center gap-0.5 rounded text-[11px] font-medium text-gray-500 transition-colors hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait"
                     >
                       <X className="h-3 w-3" aria-hidden="true" />
-                      Clear
+                      {t('clear')}
                     </button>
                   )}
                 </div>
@@ -736,13 +775,99 @@ export default function CardDetailModal({
             </section>
 
             <section aria-labelledby="labels-heading">
-              <h3
-                id="labels-heading"
-                className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500"
-              >
-                <Tag className="h-3.5 w-3.5" aria-hidden="true" />
-                Labels
-              </h3>
+              <div className="flex items-center justify-between gap-2">
+                <h3
+                  id="labels-heading"
+                  className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500"
+                >
+                  <Tag className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t('labels')}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsLabelFormOpen((open) => !open)}
+                  aria-expanded={isLabelFormOpen}
+                  aria-controls="new-label-form"
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                >
+                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t('addLabels')}
+                </button>
+              </div>
+
+              {isLabelFormOpen && (
+                <form
+                  id="new-label-form"
+                  onSubmit={handleCreateLabel}
+                  className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3"
+                >
+                  <label htmlFor="new-label-name" className="sr-only">
+                    {t('labelName')}
+                  </label>
+                  <input
+                    id="new-label-name"
+                    autoFocus
+                    value={newLabelName}
+                    onChange={(event) => setNewLabelName(event.target.value)}
+                    maxLength={40}
+                    placeholder={t('labelName')}
+                    className="field w-full text-sm"
+                  />
+
+                  <div
+                    role="group"
+                    aria-label={t('labelColor')}
+                    className="mt-2 flex flex-wrap items-center gap-1.5"
+                  >
+                    {LabelColors.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => setNewLabelColor(color)}
+                        aria-label={t('useColor', { color })}
+                        aria-pressed={newLabelColor === color}
+                        className={`h-5 w-5 rounded-full transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
+                          newLabelColor === color
+                            ? 'ring-2 ring-gray-900 ring-offset-1'
+                            : ''
+                        }`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={
+                        !newLabelName.trim() ||
+                        createLabel.isPending ||
+                        addLabel.isPending
+                      }
+                      className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-300"
+                    >
+                      {createLabel.isPending || addLabel.isPending ? (
+                        <Loader2
+                          className="h-3 w-3 animate-spin"
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                      {t('createLabel')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsLabelFormOpen(false);
+                        setNewLabelName('');
+                      }}
+                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    >
+                      {t('cancel')}
+                    </button>
+                  </div>
+                </form>
+              )}
+
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {(board.labels ?? []).map((label) => {
                   const active = assignedLabelIds.has(label.id);
@@ -796,7 +921,7 @@ export default function CardDetailModal({
 
                 {(board.labels ?? []).length === 0 && (
                   <p className="text-xs text-gray-500">
-                    No labels on this board yet.
+                    {t('noLabels')}
                   </p>
                 )}
               </div>
@@ -804,15 +929,15 @@ export default function CardDetailModal({
 
             <section aria-labelledby="danger-heading" className="pt-1">
               <h3 id="danger-heading" className="sr-only">
-                Card actions
+                {t('cardActions')}
               </h3>
               {confirmingDelete ? (
                 <div className="rounded-lg border border-red-200 bg-red-50 p-3">
                   <p className="text-xs font-medium text-red-800">
-                    Delete this card permanently?
+                    {t('deleteCardPrompt')}
                   </p>
                   <p className="mt-1 text-[11px] leading-4 text-red-700">
-                    Its checklist and comments will be removed too.
+                    {t('deleteCardWarning')}
                   </p>
                   <div className="mt-2.5 flex gap-2">
                     <button
@@ -827,14 +952,14 @@ export default function CardDetailModal({
                           aria-hidden="true"
                         />
                       )}
-                      Delete
+                      {t('delete')}
                     </button>
                     <button
                       type="button"
                       onClick={() => setConfirmingDelete(false)}
                       className="rounded-md bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
                     >
-                      Cancel
+                      {t('cancel')}
                     </button>
                   </div>
                 </div>
@@ -845,7 +970,7 @@ export default function CardDetailModal({
                   className="inline-flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-gray-500 transition-colors hover:bg-red-50 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
                 >
                   <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  Delete card
+                  {t('deleteCard')}
                 </button>
               )}
             </section>

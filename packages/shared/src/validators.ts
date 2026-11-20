@@ -26,6 +26,35 @@ export const LoginSchema = z.object({
   password: NonEmptyStringSchema,
 });
 
+const AvatarLogoSchema = z
+  .string()
+  .max(300_000, 'Profile image is too large')
+  .refine(
+    (value) =>
+      value === '' ||
+      /^data:image\/(png|jpe?g|webp);base64,/i.test(value) ||
+      /^https?:\/\//i.test(value),
+    'Profile image must be an image URL or an uploaded image',
+  );
+
+export const UpdateProfileSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(80, 'Name is too long'),
+  avatarUrl: AvatarLogoSchema.nullable().optional(),
+});
+
+export const ChangePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Current password is required'),
+    newPassword: z
+      .string()
+      .min(8, 'Password must be at least 8 characters')
+      .max(128, 'Password is too long'),
+  })
+  .refine((value) => value.currentPassword !== value.newPassword, {
+    message: 'New password must be different from the current password',
+    path: ['newPassword'],
+  });
+
 // Workspace validators
 export const CreateWorkspaceSchema = z.object({
   name: NonEmptyStringSchema,
@@ -150,6 +179,8 @@ export const PaginationSchema = z.object({
 export type CreateUserDTO = z.infer<typeof CreateUserSchema>;
 export type UpdateUserDTO = z.infer<typeof UpdateUserSchema>;
 export type LoginDTO = z.infer<typeof LoginSchema>;
+export type UpdateProfileDTO = z.infer<typeof UpdateProfileSchema>;
+export type ChangePasswordDTO = z.infer<typeof ChangePasswordSchema>;
 export type CreateWorkspaceDTO = z.infer<typeof CreateWorkspaceSchema>;
 export type UpdateWorkspaceDTO = z.infer<typeof UpdateWorkspaceSchema>;
 export type CreateBoardDTO = z.infer<typeof CreateBoardSchema>;

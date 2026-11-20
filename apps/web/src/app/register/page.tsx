@@ -3,13 +3,18 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { setCookie } from 'cookies-next';
 import { api } from '@/lib/api';
+import { usePreferences } from '@/lib/preferences';
+import { clearClientSession } from '@/lib/session';
 import { useAuthStore } from '@/store/useAuthStore';
 import type { AuthResponse } from '@/types';
 
 export default function RegisterPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const { t } = usePreferences();
   const setUser = useAuthStore((state) => state.setUser);
 
   const [name, setName] = useState('');
@@ -30,6 +35,7 @@ export default function RegisterPage() {
         password,
       });
 
+      clearClientSession(queryClient);
       setCookie('accessToken', result.accessToken, { maxAge: 60 * 60 * 24 * 7 });
       setCookie('refreshToken', result.refreshToken, {
         maxAge: 60 * 60 * 24 * 30,
@@ -52,10 +58,10 @@ export default function RegisterPage() {
             FT
           </div>
           <h1 className="text-2xl font-semibold text-gray-900">
-            Create your account
+            {t('createAccount')}
           </h1>
           <p className="mt-1 text-sm text-gray-500">
-            Start organising work in minutes
+            {t('createAccountSubtitle')}
           </p>
         </div>
 
@@ -65,7 +71,7 @@ export default function RegisterPage() {
               htmlFor="name"
               className="mb-1 block text-sm font-medium text-gray-700"
             >
-              Name
+              {t('name')}
             </label>
             <input
               id="name"
@@ -83,7 +89,7 @@ export default function RegisterPage() {
               htmlFor="email"
               className="mb-1 block text-sm font-medium text-gray-700"
             >
-              Email
+              {t('email')}
             </label>
             <input
               id="email"
@@ -101,7 +107,7 @@ export default function RegisterPage() {
               htmlFor="password"
               className="mb-1 block text-sm font-medium text-gray-700"
             >
-              Password
+              {t('password')}
             </label>
             <input
               id="password"
@@ -126,17 +132,17 @@ export default function RegisterPage() {
             disabled={isSubmitting}
             className="btn-primary w-full"
           >
-            {isSubmitting ? 'Creating account…' : 'Create account'}
+            {isSubmitting ? t('creatingAccount') : t('createAccountAction')}
           </button>
         </form>
 
         <p className="mt-4 text-center text-sm text-gray-600">
-          Already registered?{' '}
+          {t('alreadyRegistered')}{' '}
           <Link
             href="/login"
             className="font-medium text-blue-600 hover:text-blue-700"
           >
-            Sign in
+            {t('signInLink')}
           </Link>
         </p>
       </div>

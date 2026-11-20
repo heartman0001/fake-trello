@@ -25,8 +25,17 @@ interface ApiCard {
 export interface ApiBoard {
   id: string;
   title: string;
+  workspaceId: string;
+  workspaceMemberRole?: 'OWNER' | 'ADMIN' | 'MEMBER';
   labels: { id: string; name: string }[];
   columns: { id: string; title: string; cards: ApiCard[] }[];
+}
+
+export interface ApiBoardMember {
+  id: string;
+  userId: string;
+  role: 'OWNER' | 'ADMIN' | 'MEMBER';
+  user: { id: string; name: string; email: string };
 }
 
 /** Signs in through the real login form and waits for /workspaces. */
@@ -68,6 +77,113 @@ export async function signInViaApi(
   return auth;
 }
 
+/** Creates a throwaway user for member-management tests. */
+export async function registerUser(
+  request: APIRequestContext,
+  label: string,
+): Promise<AuthTokens> {
+  const stamp = `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+  const name = `E2E ${label} ${stamp}`;
+  const email = `e2e-${label}-${stamp}@fake-trello.com`;
+  const response = await request.post(`${API_URL}/auth/register`, {
+    data: { name, email, password: 'password123' },
+  });
+  expect(
+    response.ok(),
+    `POST ${API_URL}/auth/register failed: ${response.status()} ${await response.text()}`,
+  ).toBeTruthy();
+  return response.json();
+}
+
+export interface ApiWorkspaceManagement {
+  members: { userId: string; role: 'OWNER' | 'ADMIN' | 'MEMBER' }[];
+  invitees: { userId: string }[];
+}
+
+export async function getWorkspaceManagement(
+  request: APIRequestContext,
+  token: string,
+  workspaceId: string,
+): Promise<ApiWorkspaceManagement> {
+  const response = await request.get(
+    `${API_URL}/workspaces/${workspaceId}/manage`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  expect(
+    response.ok(),
+    `GET workspace management failed: ${response.status()} ${await response.text()}`,
+  ).toBeTruthy();
+  return response.json();
+}
+
+export async function addWorkspaceMember(
+  request: APIRequestContext,
+  token: string,
+  workspaceId: string,
+  userId: string,
+  role: 'ADMIN' | 'MEMBER' = 'MEMBER',
+) {
+  const response = await request.post(
+    `${API_URL}/workspaces/${workspaceId}/members`,
+    { headers: { Authorization: `Bearer ${token}` }, data: { userId, role } },
+  );
+  expect(
+    response.ok(),
+    `adding workspace member failed: ${response.status()} ${await response.text()}`,
+  ).toBeTruthy();
+}
+
+export async function removeWorkspaceMember(
+  request: APIRequestContext,
+  token: string,
+  workspaceId: string,
+  userId: string,
+) {
+  await request.delete(`${API_URL}/workspaces/${workspaceId}/members/${userId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export async function addBoardMember(
+  request: APIRequestContext,
+  token: string,
+  boardId: string,
+  userId: string,
+  role: 'ADMIN' | 'MEMBER' = 'MEMBER',
+) {
+  const response = await request.post(`${API_URL}/boards/${boardId}/members`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { userId, role },
+  });
+  expect(
+    response.ok(),
+    `adding board member failed: ${response.status()} ${await response.text()}`,
+  ).toBeTruthy();
+}
+
+export async function removeBoardMember(
+  request: APIRequestContext,
+  token: string,
+  boardId: string,
+  userId: string,
+) {
+  await request.delete(`${API_URL}/boards/${boardId}/members/${userId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export async function getBoardMembers(
+  request: APIRequestContext,
+  token: string,
+  boardId: string,
+): Promise<ApiBoardMember[]> {
+  const response = await request.get(`${API_URL}/boards/${boardId}/members`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(response.ok()).toBeTruthy();
+  return response.json();
+}
+
 /**
  * Reads the first board straight from the API so expectations follow the
  * current data instead of hardcoded seed values.
@@ -79,11 +195,18 @@ export async function fetchBoard(
   const headers = { Authorization: `Bearer ${token}` };
   const boardsResponse = await request.get(`${API_URL}/boards`, { headers });
   expect(boardsResponse.ok()).toBeTruthy();
-  const boards: { id: string }[] = await boardsResponse.json();
+  const boards: { id: string; _count?: { columns?: number } }[] =
+    await boardsResponse.json();
   expect(boards.length, 'demo user needs at least one board').toBeGreaterThan(0);
 
+  // Other tests may create empty boards, so prefer the richest board from the
+  // seed data instead of whichever one the API happens to return first.
+  const seededBoard = [...boards].sort(
+    (a, b) => (b._count?.columns ?? 0) - (a._count?.columns ?? 0),
+  )[0];
+
   const boardResponse = await request.get(
-    `${API_URL}/boards/${boards[0].id}`,
+    `${API_URL}/boards/${seededBoard.id}`,
     { headers },
   );
   expect(boardResponse.ok()).toBeTruthy();

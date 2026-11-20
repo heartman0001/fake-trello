@@ -31,7 +31,9 @@ export class CardsService {
     private realtime: RealtimeGateway,
   ) {}
 
-  async findAll(columnId: string) {
+  async findAll(boardId: string, columnId: string) {
+    await this.ensureColumnOnBoard(boardId, columnId);
+
     return this.prisma.card.findMany({
       where: { columnId },
       include: CARD_INCLUDE,
@@ -39,14 +41,14 @@ export class CardsService {
     });
   }
 
-  async findById(id: string) {
-    const card = await this.prisma.card.findUnique({
-      where: { id },
+  async findById(boardId: string, columnId: string, id: string) {
+    const card = await this.prisma.card.findFirst({
+      where: { id, columnId, column: { is: { boardId } } },
       include: CARD_INCLUDE,
     });
 
     if (!card) {
-      throw new NotFoundException('Card not found');
+      throw new NotFoundException('Card not found on this board');
     }
 
     return card;
@@ -213,6 +215,7 @@ export class CardsService {
     userId: string,
   ) {
     await this.ensureColumnAccess(boardId, columnId, userId);
+    await this.ensureCardOnColumn(boardId, columnId, cardId);
 
     const label = await this.prisma.label.findUnique({
       where: { id: labelId },
@@ -229,7 +232,7 @@ export class CardsService {
       create: { cardId, labelId },
     });
 
-    const card = await this.findById(cardId);
+    const card = await this.findById(boardId, columnId, cardId);
     this.realtime.broadcastCardUpdated(boardId, card);
     return card;
   }
@@ -242,10 +245,11 @@ export class CardsService {
     userId: string,
   ) {
     await this.ensureColumnAccess(boardId, columnId, userId);
+    await this.ensureCardOnColumn(boardId, columnId, cardId);
 
     await this.prisma.cardLabel.deleteMany({ where: { cardId, labelId } });
 
-    const card = await this.findById(cardId);
+    const card = await this.findById(boardId, columnId, cardId);
     this.realtime.broadcastCardUpdated(boardId, card);
     return card;
   }
@@ -259,6 +263,7 @@ export class CardsService {
             members: { where: { userId }, select: { id: true } },
           },
         },
+        boardMembers: { where: { userId }, select: { id: true } },
       },
     });
 
@@ -266,7 +271,11 @@ export class CardsService {
       throw new NotFoundException('Board not found');
     }
 
-    if (board.workspace.ownerId !== userId && board.workspace.members.length === 0) {
+    if (
+      board.workspace.ownerId !== userId &&
+      board.workspace.members.length === 0 &&
+      board.boardMembers.length === 0
+    ) {
       throw new ForbiddenException('You do not have access to this board');
     }
   }
@@ -277,14 +286,32 @@ export class CardsService {
     userId: string,
   ) {
     await this.ensureBoardAccess(boardId, userId);
+    await this.ensureColumnOnBoard(boardId, columnId);
+  }
 
-    const column = await this.prisma.column.findUnique({
-      where: { id: columnId },
-      select: { boardId: true },
+  private async ensureColumnOnBoard(boardId: string, columnId: string) {
+    const column = await this.prisma.column.findFirst({
+      where: { id: columnId, boardId },
+      select: { id: true },
     });
 
-    if (!column || column.boardId !== boardId) {
+    if (!column) {
       throw new NotFoundException('Column not found on this board');
+    }
+  }
+
+  private async ensureCardOnColumn(
+    boardId: string,
+    columnId: string,
+    cardId: string,
+  ) {
+    const card = await this.prisma.card.findFirst({
+      where: { id: cardId, columnId, column: { is: { boardId } } },
+      select: { id: true },
+    });
+
+    if (!card) {
+      throw new NotFoundException('Card not found on this board');
     }
   }
 

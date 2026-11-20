@@ -19,8 +19,11 @@ export class CardsController {
   constructor(private cardsService: CardsService) {}
 
   @Get()
-  async findAll(@Param('columnId') columnId: string) {
-    return this.cardsService.findAll(columnId);
+  async findAll(
+    @Param('boardId') boardId: string,
+    @Param('columnId') columnId: string,
+  ) {
+    return this.cardsService.findAll(boardId, columnId);
   }
 
   @Post()
@@ -34,8 +37,12 @@ export class CardsController {
   }
 
   @Get(':id')
-  async findById(@Param('id') id: string) {
-    return this.cardsService.findById(id);
+  async findById(
+    @Param('boardId') boardId: string,
+    @Param('columnId') columnId: string,
+    @Param('id') id: string,
+  ) {
+    return this.cardsService.findById(boardId, columnId, id);
   }
 
   @Put(':id')

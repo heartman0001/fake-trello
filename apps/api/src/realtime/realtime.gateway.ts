@@ -86,6 +86,7 @@ export class RealtimeGateway
         workspace: {
           include: { members: { where: { userId }, select: { id: true } } },
         },
+        boardMembers: { where: { userId }, select: { id: true } },
       },
     });
 
@@ -94,9 +95,10 @@ export class RealtimeGateway
     }
 
     const isOwner = board.workspace.ownerId === userId;
-    const isMember = board.workspace.members.length > 0;
+    const isWorkspaceMember = board.workspace.members.length > 0;
+    const isBoardMember = board.boardMembers.length > 0;
 
-    if (!isOwner && !isMember) {
+    if (!isOwner && !isWorkspaceMember && !isBoardMember) {
       return { ok: false };
     }
 

@@ -3,13 +3,18 @@
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { setCookie } from 'cookies-next';
 import { api } from '@/lib/api';
+import { usePreferences } from '@/lib/preferences';
+import { clearClientSession } from '@/lib/session';
 import { useAuthStore } from '@/store/useAuthStore';
 import type { AuthResponse } from '@/types';
 
 function LoginForm() {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const { t } = usePreferences();
   const searchParams = useSearchParams();
   const setUser = useAuthStore((state) => state.setUser);
 
@@ -29,6 +34,7 @@ function LoginForm() {
         password,
       });
 
+      clearClientSession(queryClient);
       setCookie('accessToken', result.accessToken, { maxAge: 60 * 60 * 24 * 7 });
       setCookie('refreshToken', result.refreshToken, {
         maxAge: 60 * 60 * 24 * 30,
@@ -53,10 +59,10 @@ function LoginForm() {
             FT
           </div>
           <h1 className="text-2xl font-semibold text-gray-900">
-            Welcome back
+            {t('welcomeBack')}
           </h1>
           <p className="mt-1 text-sm text-gray-500">
-            Sign in to your boards
+            {t('signInSubtitle')}
           </p>
         </div>
 
@@ -69,7 +75,7 @@ function LoginForm() {
               htmlFor="email"
               className="mb-1 block text-sm font-medium text-gray-700"
             >
-              Email
+              {t('email')}
             </label>
             <input
               id="email"
@@ -87,7 +93,7 @@ function LoginForm() {
               htmlFor="password"
               className="mb-1 block text-sm font-medium text-gray-700"
             >
-              Password
+              {t('password')}
             </label>
             <input
               id="password"
@@ -111,17 +117,17 @@ function LoginForm() {
             disabled={isSubmitting}
             className="btn-primary w-full"
           >
-            {isSubmitting ? 'Signing in…' : 'Sign in'}
+            {isSubmitting ? t('signingIn') : t('signIn')}
           </button>
         </form>
 
         <p className="mt-4 text-center text-sm text-gray-600">
-          No account?{' '}
+          {t('noAccount')}{' '}
           <Link
             href="/register"
             className="font-medium text-blue-600 hover:text-blue-700"
           >
-            Create one
+            {t('createOne')}
           </Link>
         </p>
       </div>

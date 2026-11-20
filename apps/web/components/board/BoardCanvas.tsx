@@ -1,16 +1,18 @@
 'use client';
 
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
   PointerSensor,
   closestCorners,
+  pointerWithin,
   useSensor,
   useSensors,
   type CollisionDetection,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
 import {
@@ -28,6 +30,7 @@ import type {
 import BoardColumn, { columnDndId } from './Column/BoardColumn';
 import { KanbanCardPreview } from './Card/KanbanCard';
 import { useBoardStore } from '@/store/useBoardStore';
+import { usePreferences } from '@/lib/preferences';
 
 export interface MoveCardPayload {
   cardId: string;
@@ -73,19 +76,54 @@ function toFractionalPosition(before: string | null, after: string | null) {
 
 const collisionDetectionStrategy: CollisionDetection = (args) => {
   const activeType = args.active.data.current?.type;
+  const isColumnDrag = activeType === 'column';
 
-  const droppableContainers =
-    activeType === 'column'
-      ? args.droppableContainers.filter(
-          (container) => container.data.current?.type === 'column',
-        )
-      : args.droppableContainers.filter((container) => {
-          const type = container.data.current?.type;
-          return type === 'card' || type === 'card-list';
-        });
+  const droppableContainers = isColumnDrag
+    ? args.droppableContainers.filter(
+        (container) => container.data.current?.type === 'column',
+      )
+    : args.droppableContainers.filter((container) => {
+        const type = container.data.current?.type;
+        return type === 'card' || type === 'card-list' || type === 'column';
+      });
 
+  const pointerCollisions = pointerWithin({
+    ...args,
+    droppableContainers,
+  });
+
+  if (pointerCollisions.length > 0) {
+    if (isColumnDrag) {
+      return pointerCollisions.slice(0, 1);
+    }
+
+    // Cards are nested inside the column list and the column itself, so an
+    // exact pointer hit can match all three. Prefer the most specific target:
+    // card first, then the list (empty space), then the column container.
+    const cardCollision = pointerCollisions.find(
+      (collision) =>
+        collision.data?.droppableContainer.data.current?.type === 'card',
+    );
+    if (cardCollision) return [cardCollision];
+
+    const listCollision = pointerCollisions.find(
+      (collision) =>
+        collision.data?.droppableContainer.data.current?.type === 'card-list',
+    );
+    if (listCollision) return [listCollision];
+
+    return pointerCollisions.slice(0, 1);
+  }
+
+  // Outside every container (e.g. between columns or at the board edge): fall
+  // back to corner distance so the nearest column/card still accepts the drop.
   return closestCorners({ ...args, droppableContainers });
 };
+
+interface CardDropPreview {
+  columnId: string;
+  index: number;
+}
 
 export default function BoardCanvas({
   columns,
@@ -100,7 +138,12 @@ export default function BoardCanvas({
   const [isAddingColumn, setIsAddingColumn] = useState(false);
   const [columnTitle, setColumnTitle] = useState('');
   const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
+  const [cardDropPreview, setCardDropPreview] =
+    useState<CardDropPreview | null>(null);
+  const cardDropPreviewRef = useRef<CardDropPreview | null>(null);
+  const previewSignatureRef = useRef<string | null>(null);
   const columnTitleId = useId();
+  const { t } = usePreferences();
 
   const setIsDragging = useBoardStore((state) => state.setIsDragging);
 
@@ -117,6 +160,40 @@ export default function BoardCanvas({
     () => columns.map((column) => columnDndId(column.id)),
     [columns],
   );
+
+  // The preview moves the active card into the hovered column so the gap and
+  // the card placeholder are visible before onDragEnd commits anything.
+  const previewColumns = useMemo(() => {
+    if (!cardDropPreview || activeDrag?.type !== 'card') return columns;
+
+    const movingCard = columns
+      .flatMap((column) => column.cards)
+      .find((card) => card.id === activeDrag.card.id);
+
+    if (!movingCard) return columns;
+
+    return columns.map((column) => {
+      const withoutActive = column.cards.filter(
+        (card) => card.id !== movingCard.id,
+      );
+
+      if (column.id !== cardDropPreview.columnId) {
+        return withoutActive.length === column.cards.length
+          ? column
+          : { ...column, cards: withoutActive };
+      }
+
+      const insertAt = Math.min(cardDropPreview.index, withoutActive.length);
+      return {
+        ...column,
+        cards: [
+          ...withoutActive.slice(0, insertAt),
+          { ...movingCard, columnId: column.id },
+          ...withoutActive.slice(insertAt),
+        ],
+      };
+    });
+  }, [columns, cardDropPreview, activeDrag]);
 
   const closeComposer = () => {
     setIsAddingColumn(false);
@@ -135,9 +212,25 @@ export default function BoardCanvas({
   const resetDragState = () => {
     setIsDragging(false);
     setActiveDrag(null);
+    cardDropPreviewRef.current = null;
+    previewSignatureRef.current = null;
+    setCardDropPreview(null);
+  };
+
+  const updateDropPreview = (preview: CardDropPreview | null) => {
+    const signature = preview
+      ? `${preview.columnId}:${preview.index}`
+      : null;
+
+    if (signature === previewSignatureRef.current) return;
+
+    previewSignatureRef.current = signature;
+    cardDropPreviewRef.current = preview;
+    setCardDropPreview(preview);
   };
 
   const handleDragStart = ({ active }: DragStartEvent) => {
+    updateDropPreview(null);
     const data = active.data.current;
     const initialRect = active.rect.current.initial;
     const width = initialRect?.width;
@@ -164,16 +257,96 @@ export default function BoardCanvas({
     }
   };
 
+  const handleDragOver = ({ active, over }: DragOverEvent) => {
+    const activeData = active.data.current;
+    if (activeData?.type !== 'card' || !over) {
+      updateDropPreview(null);
+      return;
+    }
+
+    const activeCardId = activeData.cardId as string;
+    const sourceColumnId =
+      activeDrag?.type === 'card'
+        ? activeDrag.card.columnId
+        : (activeData.columnId as string);
+    const overData = over.data.current;
+
+    if (!overData) return;
+
+    let targetColumnId: string | null = null;
+    let overCardId: string | null = null;
+
+    if (overData.type === 'card') {
+      // The card already moved into the preview target under the pointer; keep
+      // the current insertion index instead of flipping to the column end.
+      if (overData.cardId === activeCardId) return;
+
+      targetColumnId = overData.columnId as string;
+      overCardId = overData.cardId as string;
+    } else if (overData.type === 'card-list' || overData.type === 'column') {
+      targetColumnId = overData.columnId as string;
+    }
+
+    if (!targetColumnId) return;
+
+    const targetColumn = columns.find(
+      (column) => column.id === targetColumnId,
+    );
+    if (!targetColumn) return;
+
+    const targetCards = targetColumn.cards.filter(
+      (card) => card.id !== activeCardId,
+    );
+
+    let index = targetCards.length;
+
+    if (overCardId) {
+      const overIndex = targetCards.findIndex(
+        (card) => card.id === overCardId,
+      );
+
+      if (overIndex >= 0) {
+        if (targetColumnId === sourceColumnId) {
+          const sourceColumn = columns.find(
+            (column) => column.id === sourceColumnId,
+          );
+          const sourceIndex = sourceColumn?.cards.findIndex(
+            (card) => card.id === activeCardId,
+          );
+          const overOriginalIndex = targetColumn.cards.findIndex(
+            (card) => card.id === overCardId,
+          );
+
+          // Dragging down inserts after the hovered card; dragging up inserts
+          // before it, matching the sortable transform the user sees.
+          index =
+            sourceIndex !== undefined &&
+            sourceIndex !== -1 &&
+            overOriginalIndex !== -1 &&
+            sourceIndex < overOriginalIndex
+              ? overIndex + 1
+              : overIndex;
+        } else {
+          index = overIndex;
+        }
+      }
+    }
+
+    updateDropPreview({ columnId: targetColumnId, index });
+  };
+
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
     const activeData = active.data.current;
     const overData = over?.data.current ?? null;
+    const dropPreview = cardDropPreviewRef.current;
+    const draggedCard = activeDrag?.type === 'card' ? activeDrag.card : null;
 
     resetDragState();
 
-    if (!over || !activeData || !overData) return;
+    if (!activeData) return;
 
     if (activeData.type === 'column') {
-      if (overData.type !== 'column') return;
+      if (overData?.type !== 'column') return;
 
       const oldIndex = columns.findIndex(
         (column) => column.id === activeData.columnId,
@@ -195,29 +368,41 @@ export default function BoardCanvas({
     if (activeData.type !== 'card') return;
 
     const activeCardId = activeData.cardId as string;
-    const sourceColumnId = activeData.columnId as string;
+    const sourceColumnId =
+      draggedCard?.columnId ?? (activeData.columnId as string);
+    const movingCard = columns
+      .flatMap((column) => column.cards)
+      .find((card) => card.id === activeCardId);
     const sourceColumn = columns.find(
       (column) => column.id === sourceColumnId,
-    );
-    const movingCard = sourceColumn?.cards.find(
-      (card) => card.id === activeCardId,
     );
 
     if (!movingCard || !sourceColumn) return;
 
-    let targetColumnId: string | null = null;
+    // The preview already encodes the final column/index. It is also the
+    // reliable source on drop because dnd-kit may resolve `over` to the
+    // previewed card itself, whose data no longer points at the source column.
+    let targetColumnId: string | null = dropPreview?.columnId ?? null;
     let overCardId: string | null = null;
 
-    if (overData.type === 'card') {
-      targetColumnId = overData.columnId as string;
-      overCardId = overData.cardId as string;
-    } else if (overData.type === 'card-list' || overData.type === 'column') {
-      targetColumnId = overData.columnId as string;
+    if (!targetColumnId) {
+      if (!overData) return;
+
+      if (overData.type === 'card') {
+        targetColumnId = overData.columnId as string;
+        overCardId = overData.cardId as string;
+      } else if (overData.type === 'card-list' || overData.type === 'column') {
+        targetColumnId = overData.columnId as string;
+      }
     }
 
     if (!targetColumnId) return;
 
-    if (targetColumnId === sourceColumnId && overCardId === activeCardId) {
+    if (
+      !dropPreview &&
+      targetColumnId === sourceColumnId &&
+      overCardId === activeCardId
+    ) {
       return;
     }
 
@@ -227,6 +412,7 @@ export default function BoardCanvas({
     if (!targetColumn) return;
 
     if (
+      !dropPreview &&
       targetColumnId === sourceColumnId &&
       !overCardId &&
       sourceColumn.cards[sourceColumn.cards.length - 1]?.id === activeCardId
@@ -238,10 +424,18 @@ export default function BoardCanvas({
       (card) => card.id !== activeCardId,
     );
 
+    const previewIndex =
+      dropPreview?.columnId === targetColumnId
+        ? Math.min(dropPreview.index, targetCards.length)
+        : null;
+
     let before: string | null = null;
     let after: string | null = null;
 
-    if (overCardId) {
+    if (previewIndex !== null) {
+      before = targetCards[previewIndex - 1]?.position ?? null;
+      after = targetCards[previewIndex]?.position ?? null;
+    } else if (overCardId) {
       const overIndex = targetCards.findIndex(
         (card) => card.id === overCardId,
       );
@@ -292,6 +486,7 @@ export default function BoardCanvas({
       sensors={sensors}
       collisionDetection={collisionDetectionStrategy}
       onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
       onDragCancel={resetDragState}
       accessibility={{
@@ -336,17 +531,24 @@ export default function BoardCanvas({
       }}
     >
       <main
-        className="flex h-[calc(100vh-64px)] gap-4 overflow-x-auto overflow-y-hidden bg-gray-50 p-6"
+        className="flex h-[calc(100dvh-7rem)] w-full min-w-0 max-w-full gap-3 overflow-x-auto overflow-y-hidden bg-gray-50 p-4 sm:h-[calc(100vh-64px)] sm:gap-4 sm:p-6"
         aria-label="Kanban board"
       >
         <SortableContext
           items={columnIds}
           strategy={horizontalListSortingStrategy}
         >
-          {columns.map((column) => (
+          {previewColumns.map((column) => (
             <BoardColumn
               key={column.id}
               column={column}
+              previewCardId={
+                cardDropPreview?.columnId === column.id
+                  ? activeDrag?.type === 'card'
+                    ? activeDrag.card.id
+                    : null
+                  : null
+              }
               isFiltered={isFiltered}
               onAddCard={onAddCard}
               onOpenCard={onOpenCard}
@@ -358,13 +560,13 @@ export default function BoardCanvas({
         {isAddingColumn ? (
           <form
             onSubmit={handleAddColumn}
-            className="h-fit w-80 shrink-0 self-start rounded-xl border border-gray-200 bg-white p-3 shadow-sm"
+            className="h-fit w-[min(20rem,calc(100vw-2rem))] shrink-0 self-start rounded-xl border border-gray-200 bg-white p-3 shadow-sm"
           >
             <label
               htmlFor={columnTitleId}
               className="mb-1.5 block text-sm font-semibold text-gray-900"
             >
-              Add column
+              {t('addColumn')}
             </label>
             <input
               id={columnTitleId}
@@ -377,7 +579,7 @@ export default function BoardCanvas({
               onKeyDown={(event) => {
                 if (event.key === 'Escape') closeComposer();
               }}
-              placeholder="Enter a column title…"
+              placeholder={t('enterColumnTitle')}
               className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <div className="mt-2 flex items-center gap-2">
@@ -386,14 +588,14 @@ export default function BoardCanvas({
                 disabled={!columnTitle.trim()}
                 className="inline-flex items-center rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:bg-blue-300"
               >
-                Add column
+                {t('addColumn')}
               </button>
               <button
                 type="button"
                 onClick={closeComposer}
                 className="rounded-md px-2 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 focus-visible:ring-offset-1"
               >
-                Cancel
+                {t('cancel')}
               </button>
             </div>
           </form>
@@ -401,17 +603,19 @@ export default function BoardCanvas({
           <button
             type="button"
             onClick={() => setIsAddingColumn(true)}
-            className="flex h-fit w-80 shrink-0 flex-col items-center gap-2 self-start rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center transition-colors hover:border-blue-400 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-            aria-label="Add a column"
+            className="flex h-fit w-[min(20rem,calc(100vw-2rem))] shrink-0 flex-col items-center gap-2 self-start rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center transition-colors hover:border-blue-400 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+            aria-label={t('addColumn')}
           >
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-500 shadow-sm">
               <Plus className="h-5 w-5" aria-hidden="true" />
             </span>
             <span className="text-sm font-medium text-gray-700">
-              {columns.length === 0 ? 'Create your first column' : 'Add column'}
+              {columns.length === 0
+                ? t('addFirstColumn')
+                : t('addColumn')}
             </span>
             <span className="text-xs text-gray-500">
-              Group cards into a stage of work.
+              {t('groupCardsHint')}
             </span>
           </button>
         )}

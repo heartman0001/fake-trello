@@ -1,0 +1,11 @@
+model_list:
+  - model_name: glm-4.7-flash
+    litellm_params:
+      model: openai/glm-4.7-flash
+      api_base: https://api.z.ai/api/paas/v4
+      api_key: os.environ/ZAI_API_KEY
+
+router_settings:
+  num_retries: 10
+  retry_after: 3
+  allowed_fails: 15

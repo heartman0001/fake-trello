@@ -22,7 +22,9 @@ export class CommentsService {
     private realtime: RealtimeGateway,
   ) {}
 
-  async findAll(cardId: string) {
+  async findAll(boardId: string, columnId: string, cardId: string) {
+    await this.ensureCardOnPath(boardId, columnId, cardId);
+
     return this.prisma.comment.findMany({
       where: { cardId },
       include: COMMENT_INCLUDE,
@@ -30,21 +32,39 @@ export class CommentsService {
     });
   }
 
-  async findById(id: string) {
-    const comment = await this.prisma.comment.findUnique({
-      where: { id },
+  async findById(
+    boardId: string,
+    columnId: string,
+    cardId: string,
+    id: string,
+  ) {
+    await this.ensureCardOnPath(boardId, columnId, cardId);
+
+    const comment = await this.prisma.comment.findFirst({
+      where: { id, cardId },
       include: COMMENT_INCLUDE,
     });
 
     if (!comment) {
-      throw new NotFoundException('Comment not found');
+      throw new NotFoundException('Comment not found on this card');
     }
 
     return comment;
   }
 
-  async create(cardId: string, userId: string, dto: CreateCommentDTO) {
-    const context = await this.ensureCardAccess(cardId, userId);
+  async create(
+    boardId: string,
+    columnId: string,
+    cardId: string,
+    userId: string,
+    dto: CreateCommentDTO,
+  ) {
+    const context = await this.ensureCardAccess(
+      boardId,
+      columnId,
+      cardId,
+      userId,
+    );
 
     const comment = await this.prisma.comment.create({
       data: { cardId, userId, content: dto.content },
@@ -80,6 +100,13 @@ export class CommentsService {
       throw new ForbiddenException('You can only edit your own comments');
     }
 
+    await this.ensureCardAccess(
+      comment.card.column.boardId,
+      comment.card.columnId,
+      comment.card.id,
+      userId,
+    );
+
     const updated = await this.prisma.comment.update({
       where: { id },
       data: { content: dto.content },
@@ -109,6 +136,13 @@ export class CommentsService {
       throw new ForbiddenException('You can only delete your own comments');
     }
 
+    await this.ensureCardAccess(
+      comment.card.column.boardId,
+      comment.card.columnId,
+      comment.card.id,
+      userId,
+    );
+
     await this.prisma.comment.delete({ where: { id } });
 
     this.realtime.broadcastCardCommented(comment.card.column.boardId, {
@@ -120,7 +154,27 @@ export class CommentsService {
     return { message: 'Comment deleted successfully' };
   }
 
-  private async ensureCardAccess(cardId: string, userId: string) {
+  private async ensureCardOnPath(
+    boardId: string,
+    columnId: string,
+    cardId: string,
+  ) {
+    const card = await this.prisma.card.findFirst({
+      where: { id: cardId, columnId, column: { is: { boardId } } },
+      select: { id: true },
+    });
+
+    if (!card) {
+      throw new NotFoundException('Card not found on this board');
+    }
+  }
+
+  private async ensureCardAccess(
+    boardId: string,
+    columnId: string,
+    cardId: string,
+    userId: string,
+  ) {
     const card = await this.prisma.card.findUnique({
       where: { id: cardId },
       include: {
@@ -133,6 +187,7 @@ export class CommentsService {
                     members: { where: { userId }, select: { id: true } },
                   },
                 },
+                boardMembers: { where: { userId }, select: { id: true } },
               },
             },
           },
@@ -140,12 +195,20 @@ export class CommentsService {
       },
     });
 
-    if (!card) {
-      throw new NotFoundException('Card not found');
+    if (
+      !card ||
+      card.columnId !== columnId ||
+      card.column.boardId !== boardId
+    ) {
+      throw new NotFoundException('Card not found on this board');
     }
 
-    const { workspace } = card.column.board;
-    if (workspace.ownerId !== userId && workspace.members.length === 0) {
+    const { workspace, boardMembers } = card.column.board;
+    if (
+      workspace.ownerId !== userId &&
+      workspace.members.length === 0 &&
+      boardMembers.length === 0
+    ) {
       throw new ForbiddenException('You do not have access to this card');
     }
 

@@ -16,9 +16,9 @@ export class ColumnsService {
     return columns;
   }
 
-  async findById(id: string) {
-    const column = await this.prisma.column.findUnique({
-      where: { id },
+  async findById(boardId: string, id: string) {
+    const column = await this.prisma.column.findFirst({
+      where: { id, boardId },
       include: {
         cards: {
           orderBy: { position: 'asc' },
@@ -27,7 +27,7 @@ export class ColumnsService {
     });
 
     if (!column) {
-      throw new NotFoundException('Column not found');
+      throw new NotFoundException('Column not found on this board');
     }
 
     return column;
@@ -62,8 +62,13 @@ export class ColumnsService {
     return column;
   }
 
-  async update(id: string, userId: string, updateColumnDto: UpdateColumnDTO) {
-    await this.ensureColumnAccess(id, userId);
+  async update(
+    boardId: string,
+    id: string,
+    userId: string,
+    updateColumnDto: UpdateColumnDTO,
+  ) {
+    await this.ensureColumnAccess(boardId, id, userId);
 
     const column = await this.prisma.column.update({
       where: { id },
@@ -73,8 +78,8 @@ export class ColumnsService {
     return column;
   }
 
-  async delete(id: string, userId: string) {
-    await this.ensureColumnAccess(id, userId);
+  async delete(boardId: string, id: string, userId: string) {
+    await this.ensureColumnAccess(boardId, id, userId);
 
     const column = await this.prisma.column.findUnique({
       where: { id },
@@ -135,6 +140,7 @@ export class ColumnsService {
         OR: [
           { ownerId: userId },
           { members: { some: { userId } } },
+          { boards: { some: { id: boardId, boardMembers: { some: { userId } } } } },
         ],
       },
     });
@@ -144,7 +150,11 @@ export class ColumnsService {
     }
   }
 
-  private async ensureColumnAccess(columnId: string, userId: string) {
+  private async ensureColumnAccess(
+    boardId: string,
+    columnId: string,
+    userId: string,
+  ) {
     const column = await this.prisma.column.findUnique({
       where: { id: columnId },
       include: {
@@ -155,21 +165,25 @@ export class ColumnsService {
                 members: { where: { userId }, select: { userId: true } },
               },
             },
+            boardMembers: { where: { userId }, select: { userId: true } },
           },
         },
       },
     });
 
-    if (!column) {
-      throw new NotFoundException('Column not found');
+    if (!column || column.boardId !== boardId) {
+      throw new NotFoundException('Column not found on this board');
     }
 
     const isOwner = column.board.workspace.ownerId === userId;
     const isMember = column.board.workspace.members.some(
       (m) => m.userId === userId,
     );
+    const isBoardMember = column.board.boardMembers.some(
+      (m) => m.userId === userId,
+    );
 
-    if (!isOwner && !isMember) {
+    if (!isOwner && !isMember && !isBoardMember) {
       throw new ForbiddenException('You do not have permission to access this column');
     }
   }

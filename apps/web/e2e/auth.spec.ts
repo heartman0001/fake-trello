@@ -37,10 +37,34 @@ test.describe('authentication', () => {
 
   test('signing out returns to the login page', async ({ page }) => {
     await login(page);
+    await page.getByRole('link', { name: 'Settings' }).click();
+    await expect(page).toHaveURL(/\/settings$/);
     await page.getByRole('button', { name: 'Sign out' }).click();
 
     await expect(page).toHaveURL(/\/login$/);
     await page.goto('/workspaces');
     await expect(page).toHaveURL(/\/login\?next=%2Fworkspaces$/);
+  });
+
+  test('signing out clears another tab instead of leaving cached data', async ({
+    page,
+    context,
+  }) => {
+    await login(page);
+
+    const otherTab = await context.newPage();
+    await otherTab.goto('/workspaces');
+    await expect(otherTab.getByRole('heading', { name: 'Your work' })).toBeVisible();
+    await expect(
+      otherTab.locator('a[href^="/board/"]').first(),
+    ).toBeVisible();
+
+    await page.getByRole('link', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: 'Sign out' }).click();
+
+    await expect(otherTab).toHaveURL(/\/login/);
+    await expect(
+      otherTab.getByRole('heading', { name: 'Your work' }),
+    ).toHaveCount(0);
   });
 });

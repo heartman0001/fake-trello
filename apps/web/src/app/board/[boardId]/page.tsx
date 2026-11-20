@@ -6,21 +6,25 @@ import { AlertCircle, X } from 'lucide-react';
 import type {
   BoardWithRelations,
   CardWithRelations,
+  ColumnWithRelations,
 } from '@fake-trello/shared';
 import BoardHeader, {
   EMPTY_BOARD_FILTERS,
   type BoardFilters,
 } from '@/components/board/BoardHeader';
 import BoardCanvas from '@/components/board/BoardCanvas';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import {
   useBoard,
   useCreateCard,
   useCreateColumn,
+  useDeleteBoard,
   useDeleteColumn,
   useMoveCard,
   useReorderColumn,
 } from '@/hooks/useBoardQueries';
 import { useBoardSocket } from '@/hooks/useBoardSocket';
+import { usePreferences } from '@/lib/preferences';
 
 function startOfDay(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -77,17 +81,29 @@ function filterBoard(board: BoardWithRelations, filters: BoardFilters) {
 export default function BoardPage() {
   const params = useParams<{ boardId: string }>();
   const router = useRouter();
+  const { t } = usePreferences();
   const boardId = params.boardId;
 
   const boardQuery = useBoard(boardId);
   const createCard = useCreateCard(boardId);
   const createColumn = useCreateColumn(boardId);
+  const deleteBoard = useDeleteBoard(boardId);
   const deleteColumn = useDeleteColumn(boardId);
   const moveCard = useMoveCard(boardId);
   const reorderColumns = useReorderColumn(boardId);
 
   const [filters, setFilters] = useState<BoardFilters>(EMPTY_BOARD_FILTERS);
+  const [isDeleteBoardOpen, setIsDeleteBoardOpen] = useState(false);
+  const [deleteBoardError, setDeleteBoardError] = useState<string | null>(null);
+  const [columnToDelete, setColumnToDelete] =
+    useState<ColumnWithRelations | null>(null);
+  const [deleteColumnError, setDeleteColumnError] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
+
+  // The API resolves the caller's role from workspace/board membership.
+  const memberRole = boardQuery.data?.workspaceMemberRole ?? 'MEMBER';
 
   useBoardSocket(boardId);
 
@@ -128,7 +144,7 @@ export default function BoardPage() {
           ))}
         </div>
         <p className="sr-only" role="status">
-          Loading board…
+          {t('loadingBoard')}
         </p>
       </div>
     );
@@ -138,18 +154,18 @@ export default function BoardPage() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-gray-50 px-4 text-center">
         <h1 className="text-lg font-semibold text-gray-900">
-          Board unavailable
+          {t('boardUnavailable')}
         </h1>
         <p className="max-w-sm text-sm text-gray-500">
           {boardQuery.error instanceof Error
             ? boardQuery.error.message
-            : 'This board could not be loaded. Try again from your workspaces.'}
+            : t('boardUnavailableDescription')}
         </p>
         <a
           href="/workspaces"
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
         >
-          Back to workspaces
+          {t('back')}
         </a>
       </div>
     );
@@ -168,6 +184,12 @@ export default function BoardPage() {
         visibleCardCount={visibleCardCount}
         filters={filters}
         onFiltersChange={setFilters}
+        memberRole={memberRole}
+        workspaceId={board.workspaceId}
+        onDeleteBoard={() => {
+          setIsDeleteBoardOpen(true);
+          setDeleteBoardError(null);
+        }}
       />
 
       <BoardCanvas
@@ -188,15 +210,11 @@ export default function BoardPage() {
           })
         }
         onDeleteColumn={(columnId) => {
-          if (
-            window.confirm(
-              'Delete this column and all of its cards? This cannot be undone.',
-            )
-          ) {
-            deleteColumn.mutate(columnId, {
-              onError: (err) => setError(err.message),
-            });
-          }
+          const column = board.columns.find((entry) => entry.id === columnId);
+          if (!column) return;
+
+          setColumnToDelete(column);
+          setDeleteColumnError(null);
         }}
         onMoveCard={(payload) =>
           moveCard.mutate(payload, {
@@ -209,6 +227,88 @@ export default function BoardPage() {
           })
         }
       />
+
+      {isDeleteBoardOpen && (
+        <ConfirmDialog
+          open
+          title={t('deleteBoardTitle')}
+          description={t('deleteBoardDescription', { name: board.title })}
+          summary={t('deleteBoardSummary', {
+            columns: t(
+              board.columns.length === 1
+                ? 'columnCount'
+                : 'columnCountPlural',
+              { count: board.columns.length },
+            ),
+            cards: t(totalCards === 1 ? 'cardCount' : 'cardCountPlural', {
+              count: totalCards,
+            }),
+          })}
+          confirmLabel={t('deleteBoard')}
+          pendingLabel={t('deleting')}
+          isPending={deleteBoard.isPending}
+          error={deleteBoardError}
+          onConfirm={() => {
+            if (deleteBoard.isPending) return;
+
+            deleteBoard.mutate(undefined, {
+              onSuccess: () => {
+                setIsDeleteBoardOpen(false);
+                setDeleteBoardError(null);
+                router.push('/workspaces');
+              },
+              onError: (err) => setDeleteBoardError(err.message),
+            });
+          }}
+          onClose={() => {
+            if (deleteBoard.isPending) return;
+            setIsDeleteBoardOpen(false);
+            setDeleteBoardError(null);
+          }}
+        />
+      )}
+
+      {columnToDelete && (
+        <ConfirmDialog
+          open
+          title={t('deleteColumnTitle')}
+          description={
+            columnToDelete.cards.length === 0
+              ? t('deleteColumnNoCards', { name: columnToDelete.title })
+              : t('deleteColumnWithCards', {
+                  name: columnToDelete.title,
+                  count: columnToDelete.cards.length,
+                })
+          }
+          summary={
+            columnToDelete.cards.length === 0
+              ? t('deleteColumnEmptySummary')
+              : t('deleteColumnSummary', {
+                  count: columnToDelete.cards.length,
+                })
+          }
+          confirmLabel={t('deleteColumn')}
+          pendingLabel={t('deleting')}
+          isPending={deleteColumn.isPending}
+          error={deleteColumnError}
+          onConfirm={() => {
+            if (deleteColumn.isPending) return;
+
+            deleteColumn.mutate(columnToDelete.id, {
+              onSuccess: () => {
+                setColumnToDelete(null);
+                setDeleteColumnError(null);
+              },
+              onError: (err) => setDeleteColumnError(err.message),
+            });
+          }}
+          onClose={() => {
+            if (deleteColumn.isPending) return;
+            setColumnToDelete(null);
+            setDeleteColumnError(null);
+          }}
+        />
+      )}
 
       {error && (
         <div
@@ -224,7 +324,7 @@ export default function BoardPage() {
             type="button"
             onClick={() => setError(null)}
             className="shrink-0 rounded p-0.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-            aria-label="Dismiss error"
+            aria-label={t('dismissError')}
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>

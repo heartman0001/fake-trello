@@ -8,8 +8,21 @@
     @apply h-full;
   }
 
+  html {
+    --font-app: var(--font-itim);
+    overflow-x: clip;
+  }
+
+  html[data-font='sarabun'] {
+    --font-app: var(--font-sarabun);
+  }
+
+  html[data-font='noto-sans-thai'] {
+    --font-app: var(--font-noto-sans-thai);
+  }
+
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    @apply bg-gray-50 font-sans text-gray-900 antialiased;
   }
 
   ::selection {
@@ -111,5 +124,9 @@
 
   .card-surface {
     @apply rounded-lg border border-gray-200 bg-white shadow-sm;
+  }
+
+  .confirm-dialog::backdrop {
+    background-color: rgb(17 24 39 / 0.5);
   }
 }

@@ -27,5 +27,12 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/', '/workspaces/:path*', '/board/:path*', '/login', '/register'],
+  matcher: [
+    '/',
+    '/workspaces/:path*',
+    '/board/:path*',
+    '/settings',
+    '/login',
+    '/register',
+  ],
 };

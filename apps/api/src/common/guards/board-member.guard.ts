@@ -9,8 +9,7 @@ import { UserRole } from '@fake-trello/shared';
 
 /**
  * Verifies that the authenticated user is the owner of, or a member of, the
- * workspace that owns the board referenced by the request. Runs after
- * JwtAuthGuard, so request.user is already populated.
+ * board referenced by the request. Runs after JwtAuthGuard, so request.user is already populated.
  *
  * Board id is read from `:boardId`, `:id` (boards routes) or `body.boardId`.
  */
@@ -27,7 +26,10 @@ export class BoardMemberGuard implements CanActivate {
     }
 
     const boardId =
-      request.params?.boardId || request.params?.id || request.body?.boardId;
+      request.params?.boardId ||
+      request.params?.id ||
+      request.body?.boardId ||
+      request.query?.boardId;
 
     // Routes without a concrete board (e.g. GET /boards) are covered by JWT
     // auth and filtered by user in the service layer.
@@ -43,6 +45,10 @@ export class BoardMemberGuard implements CanActivate {
             members: { where: { userId }, select: { role: true } },
           },
         },
+        boardMembers: {
+          where: { userId },
+          select: { role: true },
+        },
       },
     });
 
@@ -50,15 +56,28 @@ export class BoardMemberGuard implements CanActivate {
       throw new ForbiddenException('Board not found');
     }
 
-    const isOwner = board.workspace.ownerId === userId;
-    const memberRole = board.workspace.members[0]?.role;
+    // Check if user is workspace owner
+    const isWorkspaceOwner = board.workspace.ownerId === userId;
+    
+    // Check if user is workspace member
+    const workspaceMember = board.workspace.members[0];
+    const isWorkspaceMember = !!workspaceMember;
+    
+    // Check if user is board member
+    const boardMember = board.boardMembers[0];
+    const isBoardMember = !!boardMember;
 
-    if (!isOwner && !memberRole) {
+    if (!isWorkspaceOwner && !isWorkspaceMember && !isBoardMember) {
       throw new ForbiddenException('You do not have access to this board');
     }
 
+    // Determine the role: OWNER if workspace owner, otherwise board member role
+    const role = isWorkspaceOwner
+      ? UserRole.OWNER
+      : (boardMember?.role || UserRole.MEMBER);
+
     request.boardId = board.id;
-    request.user.role = isOwner ? UserRole.OWNER : memberRole;
+    request.user.role = role;
 
     return true;
   }

@@ -8,6 +8,8 @@ interface AuthState {
   logout: () => void;
 }
 
+export const AUTH_STORAGE_KEY = 'fake-trello-auth';
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
@@ -15,6 +17,6 @@ export const useAuthStore = create<AuthState>()(
       setUser: (user) => set({ user }),
       logout: () => set({ user: null }),
     }),
-    { name: 'fake-trello-auth' },
+    { name: AUTH_STORAGE_KEY },
   ),
 );

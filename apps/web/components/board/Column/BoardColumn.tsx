@@ -11,9 +11,11 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Plus, X } from 'lucide-react';
 import type { CardWithRelations, ColumnWithRelations } from '@fake-trello/shared';
 import KanbanCard, { cardDndId } from '../Card/KanbanCard';
+import { usePreferences } from '@/lib/preferences';
 
 interface BoardColumnProps {
   column: ColumnWithRelations;
+  previewCardId?: string | null;
   isFiltered?: boolean;
   onAddCard: (columnId: string, title: string) => void;
   onOpenCard: (card: CardWithRelations) => void;
@@ -25,11 +27,13 @@ export const columnDropId = (columnId: string) => `card-list:${columnId}`;
 
 export default function BoardColumn({
   column,
+  previewCardId = null,
   isFiltered = false,
   onAddCard,
   onOpenCard,
   onDeleteColumn,
 }: BoardColumnProps) {
+  const { t } = usePreferences();
   const [isAddingCard, setIsAddingCard] = useState(false);
   const [cardTitle, setCardTitle] = useState('');
   const headingId = useId();
@@ -78,7 +82,7 @@ export default function BoardColumn({
         transform: CSS.Transform.toString(transform),
         transition,
       }}
-      className={`flex h-full w-80 shrink-0 flex-col rounded-xl border border-gray-200 bg-gray-100 ${
+      className={`flex h-full w-[min(20rem,calc(100vw-2rem))] shrink-0 flex-col rounded-xl border border-gray-200 bg-gray-100 ${
         isDragging ? 'opacity-40' : ''
       }`}
     >
@@ -119,7 +123,7 @@ export default function BoardColumn({
       <div
         ref={setCardListRef}
         role="group"
-        className={`min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-y-contain px-2 pb-2 ${
+        className={`min-h-[150px] flex-1 space-y-2 overflow-y-auto overscroll-y-contain px-2 pb-2 ${
           isOver ? 'rounded-lg bg-blue-50/70 ring-1 ring-inset ring-blue-200' : ''
         }`}
         aria-label={`Cards in ${column.title}`}
@@ -128,20 +132,32 @@ export default function BoardColumn({
           items={column.cards.map((card) => cardDndId(card.id))}
           strategy={verticalListSortingStrategy}
         >
-          {column.cards.map((card) => (
-            <KanbanCard
-              key={card.id}
-              card={card}
-              onClick={() => onOpenCard(card)}
-            />
-          ))}
+          {column.cards.map((card) => {
+            const isDropPreview = card.id === previewCardId;
+
+            return (
+              <div key={card.id} className="relative">
+                <KanbanCard
+                  card={card}
+                  onClick={() => onOpenCard(card)}
+                  isDropPreview={isDropPreview}
+                />
+                {isDropPreview && (
+                  <span
+                    data-drop-placeholder="true"
+                    className="pointer-events-none absolute -top-2 left-2 z-10 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm"
+                  >
+                    {t('dropHere')}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </SortableContext>
 
         {!hasCards && (
           <p className="rounded-lg border border-dashed border-gray-300 px-3 py-6 text-center text-xs leading-relaxed text-gray-500">
-            {isFiltered
-              ? 'No cards match your filters.'
-              : 'No cards yet. Add one below to get started.'}
+            {isFiltered ? t('noCardsMatch') : t('noCardsYet')}
           </p>
         )}
       </div>
@@ -153,7 +169,7 @@ export default function BoardColumn({
             className="rounded-lg border border-blue-500 bg-white p-2 focus-within:ring-2 focus-within:ring-blue-500"
           >
             <label htmlFor={cardTitleId} className="sr-only">
-              Card title
+              {t('cardTitle')}
             </label>
             <input
               id={cardTitleId}
@@ -166,7 +182,7 @@ export default function BoardColumn({
               onKeyDown={(event) => {
                 if (event.key === 'Escape') closeComposer();
               }}
-              placeholder="Enter a card title…"
+              placeholder={t('addCardPlaceholder')}
               className="w-full rounded border-0 bg-transparent px-1 py-1 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none"
             />
             <div className="mt-2 flex items-center gap-2">
@@ -175,14 +191,14 @@ export default function BoardColumn({
                 disabled={!cardTitle.trim()}
                 className="inline-flex items-center rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:bg-blue-300"
               >
-                Add card
+                {t('addCard')}
               </button>
               <button
                 type="button"
                 onClick={closeComposer}
                 className="rounded-md px-2 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-500 focus-visible:ring-offset-1"
               >
-                Cancel
+                {t('cancel')}
               </button>
             </div>
           </form>

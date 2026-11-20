@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Body, Param, Put, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Put,
+  Delete,
+} from '@nestjs/common';
 import { WorkspacesService } from './workspaces.service';
 import { CreateWorkspaceDTO, UpdateWorkspaceDTO } from '@fake-trello/shared';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -36,6 +45,26 @@ export class WorkspacesController {
     return this.workspacesService.delete(id, user.id);
   }
 
+  @Get(':id/manage')
+  async getManagement(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.workspacesService.getManagement(id, user.id);
+  }
+
+  @Patch(':workspaceId/members/:userId')
+  async updateMemberRole(
+    @Param('workspaceId') workspaceId: string,
+    @Param('userId') userId: string,
+    @CurrentUser() user: any,
+    @Body() body: { role: string },
+  ) {
+    return this.workspacesService.updateMemberRole(
+      workspaceId,
+      user.id,
+      userId,
+      body.role,
+    );
+  }
+
   @Post(':id/members')
   async addMember(
     @Param('id') id: string,
@@ -52,5 +81,10 @@ export class WorkspacesController {
     @Param('userId') userId: string,
   ) {
     return this.workspacesService.removeMember(workspaceId, user.id, userId);
+  }
+
+  @Get(':id/members')
+  async getOtherMembers(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.workspacesService.getOtherWorkspaceMembers(id, user.id);
   }
 }

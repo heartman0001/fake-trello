@@ -20,8 +20,12 @@ export class ChecklistsController {
   constructor(private checklistsService: ChecklistsService) {}
 
   @Get()
-  async findByCard(@Param('cardId') cardId: string) {
-    return this.checklistsService.findByCard(cardId);
+  async findByCard(
+    @Param('boardId') boardId: string,
+    @Param('columnId') columnId: string,
+    @Param('cardId') cardId: string,
+  ) {
+    return this.checklistsService.findByCard(boardId, columnId, cardId);
   }
 
   @Post()

@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios';
 import { getCookie } from 'cookies-next';
+import { useAuthStore } from '@/store/useAuthStore';
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
@@ -40,6 +41,9 @@ class ApiClient {
             'accessToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
           document.cookie =
             'refreshToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+          // Drop the persisted profile as well, so a different account cannot
+          // inherit the previous user's cached identity.
+          useAuthStore.getState().logout();
           if (!window.location.pathname.startsWith('/login')) {
             window.location.href = '/login';
           }
@@ -83,6 +87,33 @@ class ApiClient {
 
   delete<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
     return this.request<T>({ ...config, method: 'DELETE', url });
+  }
+
+  // Board Members
+  addBoardMember<T>(
+    boardId: string,
+    data: { userId: string; role: string },
+    config?: AxiosRequestConfig,
+  ): Promise<T> {
+    return this.post<T>(`/boards/${boardId}/members`, data, config);
+  }
+
+  removeBoardMember<T>(boardId: string, userId: string): Promise<T> {
+    return this.delete<T>(`/boards/${boardId}/members/${userId}`);
+  }
+
+  getBoardMembers<T>(boardId: string): Promise<T> {
+    return this.get<T>(`/boards/${boardId}/members`);
+  }
+
+  // Users
+  getAllUsers<T>(params: {
+    boardId: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<T> {
+    return this.get<T>('/auth/users', { params });
   }
 }
 
